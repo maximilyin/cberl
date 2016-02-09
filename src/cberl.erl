@@ -1,12 +1,7 @@
-%%% @author Ali Yakamercan <aliyakamercan@gmail.com>
-%%% @copyright 2012-2013 Chitika Inc.
-%%% @version 1.0.5
-
 -module(cberl).
--vsn("1.0.5").
 -include("cberl.hrl").
 
--export([start_link/2, start_link/3, start_link/5, start_link/6, start_link/7]).
+-export([start_link/1, start_link/3, start_link/4, start_link/5]).
 -export([stop/1]).
 %% store operations
 -export([add/4, add/5, replace/4, replace/5, set/4, set/5, store/7]).
@@ -25,17 +20,11 @@
 -deprecated({append, 4}).
 -deprecated({prepend, 4}).
 
-%% @equiv start_link(PoolName, NumCon, "localhost:8091", "", "", "")
-start_link(PoolName, NumCon) ->
-    start_link(PoolName, NumCon, "localhost:8091", "", "", "").
+start_link(Host) ->
+    start_link(Host, "", "", "").
 
-%% @equiv start_link(PoolName, NumCon, Host, "", "", "")
-start_link(PoolName, NumCon, Host) ->
-    start_link(PoolName, NumCon, Host, "", "", "").
-
-%% @equiv start_link(PoolName, NumCon, Host, Username, Password, "")
-start_link(PoolName, NumCon, Host, Username, Password) ->
-    start_link(PoolName, NumCon, Host, Username, Password, "").
+start_link(Host, Username, Password) ->
+    start_link(Host, Username, Password, "").
 
 %% @doc Create an instance of libcouchbase
 %% hosts A list of hosts:port separated by ';' to the
@@ -48,19 +37,17 @@ start_link(PoolName, NumCon, Host, Username, Password) ->
 %% bucket The bucket to connect to
 %% @end
 %% @equiv start_link(PoolName, NumCon, Host, Username, Password, cberl_transcoder)
-start_link(PoolName, NumCon, Host, Username, Password, BucketName) ->
-    start_link(PoolName, NumCon, Host, Username, Password, BucketName, cberl_transcoder).
+start_link(Host, Username, Password, BucketName) ->
+    start_link(Host, Username, Password, BucketName, cberl_transcoder).
 
--spec start_link(atom(), integer(), string(), string(), string(), string(), atom()) -> {ok, pid()} | {error, _}.
-start_link(PoolName, NumCon, Host, Username, Password, BucketName, Transcoder) ->
-    PoolArgs = [{pool_size, NumCon},
-                {worker, cberl_worker}],
+-spec start_link(string(), string(), string(), string(), atom()) -> {ok, pid()} | {error, _}.
+start_link(Host, Username, Password, BucketName, Transcoder) ->
     WorkerArgs = [{host, Host},
 		{username, Username},
 		{password, Password},
 		{bucketname, BucketName},
 		{transcoder, Transcoder}],
-    octopus:start_pool(PoolName, PoolArgs, [WorkerArgs]).
+    cberl_worker:start_link(WorkerArgs).
 
 stop(PoolName) ->
     octopus:stop(PoolName).
@@ -295,8 +282,8 @@ handle_flush_result(PoolPid, FlushMarker, Result={ok, 201, _}) ->
 %% Type Couchbase request type
 -spec http(pid(), string(), string(), string(), http_method(), http_type())
 	  -> {ok, binary()} | {error, _}.
-http(PoolName, Path, Body, ContentType, Method, Type) ->
-    execute(PoolName, {http, Path, Body, ContentType, http_method(Method), http_type(Type)}).
+http(Pid, Path, Body, ContentType, Method, Type) ->
+    execute(Pid, {http, Path, Body, ContentType, http_method(Method), http_type(Type)}).
 
 %% @doc Query a view
 %% PoolPid pid of connection pool
@@ -352,11 +339,8 @@ remove_design_doc(PoolPid, DocName) ->
 %%%    INTERNAL FUNCTIONS     %%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-execute(PoolName, Cmd) ->
-    Fun = fun(Worker) ->
-        gen_server:call(Worker, Cmd)
-    end,
-    octopus:perform(PoolName, Fun).
+execute(Pid, Cmd) ->
+    gen_server:call(Pid, Cmd).
 
 http_type(view) -> 0;
 http_type(management) -> 1;
@@ -372,11 +356,11 @@ query_args(Args) when is_list(Args) ->
 
 decode_query_resp({ok, _, Resp}) ->
     case jsx:decode(Resp) of
-        {[{<<"total_rows">>, TotalRows}, {<<"rows">>, Rows}]} ->
+        [{<<"total_rows">>, TotalRows}, {<<"rows">>, Rows}] ->
             {ok, {TotalRows, lists:map(fun ({Row}) -> Row end, Rows)}};
-        {[{<<"rows">>, Rows}]} ->
+        [{<<"rows">>, Rows}] ->
             {ok, {lists:map(fun ({Row}) -> Row end, Rows)}};
-        {[{<<"error">>,Error}, {<<"reason">>, Reason}]} ->
+        [{<<"error">>,Error}, {<<"reason">>, Reason}] ->
             {error, {view_error(Error), Reason}}
     end;
 decode_query_resp({error, _} = E) -> E.
@@ -384,7 +368,7 @@ decode_query_resp({error, _} = E) -> E.
 decode_update_design_doc_resp({ok, Http_Code, _Resp}) when 200 =< Http_Code andalso Http_Code < 300 -> ok;
 decode_update_design_doc_resp({ok, _Http_Code, Resp}) ->
   case jsx:decode(Resp) of
-    {[{<<"error">>,Error}, {<<"reason">>, Reason}]} ->
+    [{<<"error">>,Error}, {<<"reason">>, Reason}] ->
             {error, {view_error(Error), Reason}};
     _Other -> {error, {unknown_error, Resp}}
   end.
