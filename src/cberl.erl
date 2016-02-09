@@ -53,19 +53,17 @@ start_link(PoolName, NumCon, Host, Username, Password, BucketName) ->
 
 -spec start_link(atom(), integer(), string(), string(), string(), string(), atom()) -> {ok, pid()} | {error, _}.
 start_link(PoolName, NumCon, Host, Username, Password, BucketName, Transcoder) ->
-    SizeArgs = [{size, NumCon},
-                {max_overflow, 0}],
-    PoolArgs = [{name, {local, PoolName}},
-                {worker_module, cberl_worker}] ++ SizeArgs,
+    PoolArgs = [{pool_size, NumCon},
+                {worker, cberl_worker}],
     WorkerArgs = [{host, Host},
-		  {username, Username},
-		  {password, Password},
-		  {bucketname, BucketName},
-		  {transcoder, Transcoder}],
-    poolboy:start_link(PoolArgs, WorkerArgs).
+		{username, Username},
+		{password, Password},
+		{bucketname, BucketName},
+		{transcoder, Transcoder}],
+    octopus:start_pool(PoolName, PoolArgs, [WorkerArgs]).
 
-stop(PoolPid) ->
-    poolboy:stop(PoolPid).
+stop(PoolName) ->
+    octopus:stop(PoolName).
 
 %%%%%%%%%%%%%%%%%%%%%%%%
 %%% STORE OPERATIONS %%%
@@ -297,8 +295,8 @@ handle_flush_result(PoolPid, FlushMarker, Result={ok, 201, _}) ->
 %% Type Couchbase request type
 -spec http(pid(), string(), string(), string(), http_method(), http_type())
 	  -> {ok, binary()} | {error, _}.
-http(PoolPid, Path, Body, ContentType, Method, Type) ->
-    execute(PoolPid, {http, Path, Body, ContentType, http_method(Method), http_type(Type)}).
+http(PoolName, Path, Body, ContentType, Method, Type) ->
+    execute(PoolName, {http, Path, Body, ContentType, http_method(Method), http_type(Type)}).
 
 %% @doc Query a view
 %% PoolPid pid of connection pool
@@ -311,7 +309,7 @@ view(PoolPid, DocName, ViewName, Args) ->
         undefined ->
             http(PoolPid, string:join([Path, query_args(Args)], "?"), "", "application/json", get, view);
         Keys ->
-            http(PoolPid, string:join([Path, query_args(proplists:delete(keys, Args))], "?"), binary_to_list(iolist_to_binary(jiffy:encode({[{keys, Keys}]}))), "application/json", post, view)
+            http(PoolPid, string:join([Path, query_args(proplists:delete(keys, Args))], "?"), binary_to_list(iolist_to_binary(jsx:encode([{keys, Keys}]))), "application/json", post, view)
     end,
     decode_query_resp(Resp).
 
@@ -342,7 +340,7 @@ foreach(Func, {PoolPid, DocName, ViewName, Args}) ->
 
 set_design_doc(PoolPid, DocName, DesignDoc) ->
     Path = string:join(["_design", DocName], "/"),
-    Resp = http(PoolPid, Path, binary_to_list(iolist_to_binary(jiffy:encode(DesignDoc))), "application/json", put, view),
+    Resp = http(PoolPid, Path, binary_to_list(iolist_to_binary(jsx:encode(DesignDoc))), "application/json", put, view),
     decode_update_design_doc_resp(Resp).
 
 remove_design_doc(PoolPid, DocName) ->
@@ -354,10 +352,11 @@ remove_design_doc(PoolPid, DocName) ->
 %%%    INTERNAL FUNCTIONS     %%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-execute(PoolPid, Cmd) ->
-    poolboy:transaction(PoolPid, fun(Worker) ->
-            gen_server:call(Worker, Cmd)
-       end).
+execute(PoolName, Cmd) ->
+    Fun = fun(Worker) ->
+        gen_server:call(Worker, Cmd)
+    end,
+    octopus:perform(PoolName, Fun).
 
 http_type(view) -> 0;
 http_type(management) -> 1;
@@ -372,7 +371,7 @@ query_args(Args) when is_list(Args) ->
     string:join([query_arg(A) || A <- Args], "&").
 
 decode_query_resp({ok, _, Resp}) ->
-    case jiffy:decode(Resp) of
+    case jsx:decode(Resp) of
         {[{<<"total_rows">>, TotalRows}, {<<"rows">>, Rows}]} ->
             {ok, {TotalRows, lists:map(fun ({Row}) -> Row end, Rows)}};
         {[{<<"rows">>, Rows}]} ->
@@ -384,7 +383,7 @@ decode_query_resp({error, _} = E) -> E.
 
 decode_update_design_doc_resp({ok, Http_Code, _Resp}) when 200 =< Http_Code andalso Http_Code < 300 -> ok;
 decode_update_design_doc_resp({ok, _Http_Code, Resp}) ->
-  case jiffy:decode(Resp) of
+  case jsx:decode(Resp) of
     {[{<<"error">>,Error}, {<<"reason">>, Reason}]} ->
             {error, {view_error(Error), Reason}};
     _Other -> {error, {unknown_error, Resp}}
@@ -408,9 +407,9 @@ query_arg({group_level, V}) when is_integer(V) -> string:join(["group_level", in
 query_arg({inclusive_end, true}) -> "inclusive_end=true";
 query_arg({inclusive_end, false}) -> "inclusive_end=false";
 
-query_arg({key, V}) -> string:join(["key", binary_to_list(iolist_to_binary(jiffy:encode(V)))], "=");
+query_arg({key, V}) -> string:join(["key", binary_to_list(iolist_to_binary(jsx:encode(V)))], "=");
 
-query_arg({keys, V}) when is_list(V) -> string:join(["keys", jiffy:encode(V)], "=");
+query_arg({keys, V}) when is_list(V) -> string:join(["keys", jsx:encode(V)], "=");
 
 query_arg({limit, V}) when is_integer(V) -> string:join(["limit", integer_to_list(V)], "=");
 

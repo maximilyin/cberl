@@ -10,6 +10,7 @@
 %% ===================================================================
 
 start(_StartType, _StartArgs) ->
+    ok = application:start(octopus),
     cberl_sup:start_link().
 
 stop(_State) ->

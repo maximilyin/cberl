@@ -1,13 +1,12 @@
 {application, cberl,
  [
-  {description, ""},
-  {vsn, "1.0.3"},
+  {description, "Erlang driver for CouchBase"},
+  {vsn, "1.1.0"},
+  {modules, []},
   {registered, []},
   {applications, [
                   kernel,
-                  stdlib,
-                  poolboy,
-                  jiffy
+                  stdlib
                  ]},
   {mod, { cberl_app, []}},
   {env, []}

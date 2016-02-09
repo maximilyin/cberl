@@ -1,100 +1,38 @@
-# Copyright 2012 Erlware, LLC. All Rights Reserved.
-#
-# This file is provided to you under the Apache License,
-# Version 2.0 (the "License"); you may not use this file
-# except in compliance with the License.  You may obtain
-# a copy of the License at
-#
-#   http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing,
-# software distributed under the License is distributed on an
-# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-# KIND, either express or implied.  See the License for the
-# specific language governing permissions and limitations
-# under the License.
-#
+REBAR=`which rebar`
+DIALYZER=dialyzer
 
-ERLFLAGS= -pa $(CURDIR)/.eunit -pa $(CURDIR)/ebin -pa $(CURDIR)/deps/*/ebin
+all: get-deps compile
 
-DEPS_PLT=$(CURDIR)/.deps_plt
-DEPS=erts kernel stdlib
-
-# =============================================================================
-# Verify that the programs we need to run are installed on this system
-# =============================================================================
-ERL = $(shell which erl)
-
-ifeq ($(ERL),)
-$(error "Erlang not available on this system")
-endif
-
-REBAR=$(CURDIR)/rebar
-
-ifeq ($(REBAR),)
-$(error "Rebar not available on this system")
-endif
-
-.PHONY: all compile doc clean test dialyzer typer shell distclean pdf \
-  update-deps clean-common-test-data rebuild
-
-all: deps compile dialyzer test
-
-# =============================================================================
-# Rules to build the system
-# =============================================================================
-
-deps:
-	$(REBAR) get-deps
-	$(REBAR) compile
-
-update-deps:
-	$(REBAR) update-deps
-	$(REBAR) compile
+get-deps:
+	@$(REBAR) get-deps
 
 compile:
-	$(REBAR) skip_deps=true compile
-
-doc:
-	$(REBAR) skip_deps=true doc
-
-eunit: compile clean-common-test-data
-	$(REBAR) skip_deps=true eunit
-
-test: compile eunit
-
-$(DEPS_PLT):
-	@echo Building local plt at $(DEPS_PLT)
-	@echo
-	dialyzer --output_plt $(DEPS_PLT) --build_plt \
-	   --apps $(DEPS) -r deps
-
-dialyzer: $(DEPS_PLT)
-	dialyzer --fullpath --plt $(DEPS_PLT) -Wrace_conditions -r ./ebin
-
-typer:
-	typer --plt $(DEPS_PLT) -r ./src
-
-shell: deps compile
-# You often want *rebuilt* rebar tests to be available to the
-# shell you have to call eunit (to get the tests
-# rebuilt). However, eunit runs the tests, which probably
-# fails (thats probably why You want them in the shell). This
-# runs eunit but tells make to ignore the result.
-	- @$(REBAR) skip_deps=true eunit
-	@$(ERL) $(ERLFLAGS)
-
-pdf:
-	pandoc README.md -o README.pdf
+	@$(REBAR) compile
 
 clean:
-	- rm -rf $(CURDIR)/test/*.beam
-	- rm -rf $(CURDIR)/logs
-	- rm -rf $(CURDIR)/ebin
-	$(REBAR) skip_deps=true clean
+	@$(REBAR) clean
 
-distclean: clean
-	- rm -rf $(DEPS_PLT)
-	- rm -rvf $(CURDIR)/deps
+eunit:
+	@$(REBAR) skip_deps=true eunit
 
-rebuild: distclean deps compile escript dialyzer test
+ct:
+	@$(REBAR) skip_deps=true ct
+
+tests: eunit ct
+
+rel: deps compile
+	@$(REBAR) generate
+
+relclean:
+	@rm -rf rel/cberl
+
+build-plt:
+	@$(DIALYZER) --build_plt --output_plt .cberl_dialyzer.plt \
+		--apps kernel stdlib sasl
+
+dialyze:
+	@$(DIALYZER) --src src --plt .cberl_dialyzer.plt -Werror_handling \
+		-Wrace_conditions -Wunmatched_returns # -Wunderspecs
+
+docs:
+	@$(REBAR) skip_deps=true doc
