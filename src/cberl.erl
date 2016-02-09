@@ -292,13 +292,12 @@ http(Pid, Path, Body, ContentType, Method, Type) ->
 %% Args arguments and filters (limit etc.)
 view(PoolPid, DocName, ViewName, Args) ->
     Path = string:join(["_design", DocName, "_view", ViewName], "/"),
-    Resp = case proplists:get_value(keys, Args) of
+    case proplists:get_value(keys, Args) of
         undefined ->
             http(PoolPid, string:join([Path, query_args(Args)], "?"), "", "application/json", get, view);
         Keys ->
             http(PoolPid, string:join([Path, query_args(proplists:delete(keys, Args))], "?"), binary_to_list(iolist_to_binary(jsx:encode([{keys, Keys}]))), "application/json", post, view)
-    end,
-    decode_query_resp(Resp).
+    end.
 
 foldl(Func, Acc, {PoolPid, DocName, ViewName, Args}) ->
     case view(PoolPid, DocName, ViewName, Args) of
@@ -353,17 +352,6 @@ http_method(delete) -> 3.
 
 query_args(Args) when is_list(Args) ->
     string:join([query_arg(A) || A <- Args], "&").
-
-decode_query_resp({ok, _, Resp}) ->
-    case jsx:decode(Resp) of
-        [{<<"total_rows">>, TotalRows}, {<<"rows">>, Rows}] ->
-            {ok, {TotalRows, lists:map(fun ({Row}) -> Row end, Rows)}};
-        [{<<"rows">>, Rows}] ->
-            {ok, {lists:map(fun ({Row}) -> Row end, Rows)}};
-        [{<<"error">>,Error}, {<<"reason">>, Reason}] ->
-            {error, {view_error(Error), Reason}}
-    end;
-decode_query_resp({error, _} = E) -> E.
 
 decode_update_design_doc_resp({ok, Http_Code, _Resp}) when 200 =< Http_Code andalso Http_Code < 300 -> ok;
 decode_update_design_doc_resp({ok, _Http_Code, Resp}) ->
