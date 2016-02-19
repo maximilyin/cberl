@@ -4,15 +4,16 @@
 -export([start_link/1, start_link/3, start_link/4, start_link/5]).
 -export([stop/1]).
 %% store operations
--export([add/4, add/5, replace/4, replace/5, set/4, set/5, store/7]).
+-export([add/4, add/5, replace/4, replace/5, set/4, set/5, store/7, store/8]).
 %% update operations
 -export([append/3, prepend/3, touch/3, mtouch/3]).
 -export([incr/3, incr/4, incr/5, decr/3, decr/4, decr/5]).
 -export([arithmetic/6]).
 -export([append/4, prepend/4]).
 %% retrieval operations
--export([get_and_touch/3, get_and_lock/3, mget/2, get/2, unlock/3,
-         mget/3, getl/3, http/6, view/4, foldl/3, foldr/3, foreach/2]).
+-export([get_and_touch/3, get_and_lock/3, get/2, get/3, unlock/3, mget/2,
+        mget/3, mget/4, getl/3, http/6, view/4, view/5, foldl/3, foldr/3, 
+        foreach/2]).
 %% removal operations
 -export([remove/2, flush/1, flush/2]).
 %% design doc opertations
@@ -162,13 +163,19 @@ get_and_touch(PoolPid, Key, Exp) ->
 
 -spec get(pid(), key()) -> {ok, integer(), value()} | {error, _}.
 get(PoolPid, Key) ->
-    case mget(PoolPid, [Key], 0) of
+    get(PoolPid, Key, []).
+
+get(PoolPid, Key, Opts) ->
+    case mget(PoolPid, [Key], 0, Opts) of
         {error, _} = E -> E;
         Result -> hd(Result)
     end.
 
 mget(PoolPid, Keys) ->
-    mget(PoolPid, Keys, 0).
+    mget(PoolPid, Keys, 0, []).
+
+mget(PoolPid, Keys, Opts) ->
+    mget(PoolPid, Keys, 0, Opts).
 
 -spec get_and_lock(pid(), key(), integer()) -> {ok, integer(), value()} | {error, _}.
 get_and_lock(PoolPid, Key, Exp) ->
@@ -198,8 +205,11 @@ unlock(PoolPid, Key, Cas) ->
 -spec store(pid(), operation_type(), key(), value(), atom(),
             integer(), integer()) -> ok | {error, _}.
 store(PoolPid, Op, Key, Value, TranscoderOpts, Exp, Cas) ->
+    store(PoolPid, Op, Key, Value, TranscoderOpts, Exp, Cas, []).
+
+store(PoolPid, Op, Key, Value, TranscoderOpts, Exp, Cas, Opts) ->
     execute(PoolPid, {store, Op, Key, Value,
-                       TranscoderOpts, Exp, Cas}).
+                       TranscoderOpts, Exp, Cas}, Opts).
 
 %% @doc get the value for the given key
 %% Instance libcouchbase instance to use
@@ -207,9 +217,9 @@ store(PoolPid, Op, Key, Value, TranscoderOpts, Exp, Cas) ->
 %% Key the key to get
 %% Exp When the object should expire
 %%      pass a negative number for infinity
--spec mget(pid(), [key()], integer()) -> list().
-mget(PoolPid, Keys, Exp) ->
-    execute(PoolPid, {mget, Keys, Exp, 0}).
+-spec mget(pid(), [key()], integer(), list()) -> list().
+mget(PoolPid, Keys, Exp, Opts) ->
+    execute(PoolPid, {mget, Keys, Exp, 0}, Opts).
 
 %% @doc Get an item with a lock that has a timeout
 %% Instance libcouchbase instance to use
@@ -283,7 +293,10 @@ handle_flush_result(PoolPid, FlushMarker, Result={ok, 201, _}) ->
 -spec http(pid(), string(), string(), string(), http_method(), http_type())
 	  -> {ok, binary()} | {error, _}.
 http(Pid, Path, Body, ContentType, Method, Type) ->
-    execute(Pid, {http, Path, Body, ContentType, http_method(Method), http_type(Type)}).
+    http(Pid, Path, Body, ContentType, Method, Type, []).
+
+http(Pid, Path, Body, ContentType, Method, Type, Opts) ->
+    execute(Pid, {http, Path, Body, ContentType, http_method(Method), http_type(Type)}, Opts).
 
 %% @doc Query a view
 %% PoolPid pid of connection pool
@@ -291,12 +304,18 @@ http(Pid, Path, Body, ContentType, Method, Type) ->
 %% ViewName view name
 %% Args arguments and filters (limit etc.)
 view(PoolPid, DocName, ViewName, Args) ->
+    view(PoolPid, DocName, ViewName, Args, []).
+
+view(PoolPid, DocName, ViewName, Args, Opts) ->
     Path = string:join(["_design", DocName, "_view", ViewName], "/"),
     case proplists:get_value(keys, Args) of
         undefined ->
-            http(PoolPid, string:join([Path, query_args(Args)], "?"), "", "application/json", get, view);
+            EncodedArgs = string:join([Path, query_args(Args)], "?"),
+            http(PoolPid, EncodedArgs, "", "application/json", get, view, Opts);
         Keys ->
-            http(PoolPid, string:join([Path, query_args(proplists:delete(keys, Args))], "?"), binary_to_list(iolist_to_binary(jsx:encode([{keys, Keys}]))), "application/json", post, view)
+            EncodedArgs = string:join([Path, query_args(proplists:delete(keys, Args))], "?"),
+            EncodedKeys = binary_to_list(iolist_to_binary(jsx:encode([{keys, Keys}]))),
+            http(PoolPid, EncodedArgs, EncodedKeys, "application/json", post, view, Opts)
     end.
 
 foldl(Func, Acc, {PoolPid, DocName, ViewName, Args}) ->
@@ -339,7 +358,11 @@ remove_design_doc(PoolPid, DocName) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 execute(Pid, Cmd) ->
-    gen_server:call(Pid, Cmd).
+    execute(Pid, Cmd, []).
+
+execute(Pid, Cmd, Opts) when is_list(Opts)->
+    Timeout = proplists:get_value(timeout, Opts, 5000),
+    gen_server:call(Pid, Cmd, Timeout).
 
 http_type(view) -> 0;
 http_type(management) -> 1;
