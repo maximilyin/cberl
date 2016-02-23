@@ -309,15 +309,8 @@ view(PoolPid, DocName, ViewName, Args) ->
 
 view(PoolPid, DocName, ViewName, Args, Opts) ->
     Path = string:join(["_design", DocName, "_view", ViewName], "/"),
-    case proplists:get_value(keys, Args) of
-        undefined ->
-            EncodedArgs = string:join([Path, query_args(Args)], "?"),
-            http(PoolPid, EncodedArgs, "", "application/json", get, view, Opts);
-        Keys ->
-            EncodedArgs = string:join([Path, query_args(proplists:delete(keys, Args))], "?"),
-            EncodedKeys = binary_to_list(iolist_to_binary(jsx:encode([{keys, Keys}]))),
-            http(PoolPid, EncodedArgs, EncodedKeys, "application/json", post, view, Opts)
-    end.
+    EncodedArgs = string:join([Path, query_args(Args)], "?"),
+    http(PoolPid, EncodedArgs, "", "application/json", get, view, Opts).
 
 foldl(Func, Acc, {PoolPid, DocName, ViewName, Args}) ->
     case view(PoolPid, DocName, ViewName, Args) of
@@ -346,13 +339,11 @@ foreach(Func, {PoolPid, DocName, ViewName, Args}) ->
 
 set_design_doc(PoolPid, DocName, DesignDoc) ->
     Path = string:join(["_design", DocName], "/"),
-    Resp = http(PoolPid, Path, binary_to_list(iolist_to_binary(jsx:encode(DesignDoc))), "application/json", put, view),
-    decode_update_design_doc_resp(Resp).
+    _ = http(PoolPid, Path, DesignDoc, "application/json", put, view).
 
 remove_design_doc(PoolPid, DocName) ->
     Path = string:join(["_design", DocName], "/"),
-    Resp = http(PoolPid, Path, "", "application/json", delete, view),
-    decode_update_design_doc_resp(Resp).
+    _ = http(PoolPid, Path, "", "application/json", delete, view).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%    INTERNAL FUNCTIONS     %%%
@@ -377,14 +368,6 @@ http_method(delete) -> 3.
 query_args(Args) when is_list(Args) ->
     string:join([query_arg(A) || A <- Args], "&").
 
-decode_update_design_doc_resp({ok, Http_Code, _Resp}) when 200 =< Http_Code andalso Http_Code < 300 -> ok;
-decode_update_design_doc_resp({ok, _Http_Code, Resp}) ->
-  case jsx:decode(Resp) of
-    [{<<"error">>,Error}, {<<"reason">>, Reason}] ->
-            {error, {view_error(Error), Reason}};
-    _Other -> {error, {unknown_error, Resp}}
-  end.
-
 query_arg({descending, true}) -> "descending=true";
 query_arg({descending, false}) -> "descending=false";
 
@@ -403,9 +386,9 @@ query_arg({group_level, V}) when is_integer(V) -> string:join(["group_level", in
 query_arg({inclusive_end, true}) -> "inclusive_end=true";
 query_arg({inclusive_end, false}) -> "inclusive_end=false";
 
-query_arg({key, V}) -> string:join(["key", binary_to_list(iolist_to_binary(jsx:encode(V)))], "=");
+query_arg({key, V}) -> string:join(["key", V], "=");
 
-query_arg({keys, V}) when is_list(V) -> string:join(["keys", jsx:encode(V)], "=");
+query_arg({keys, V}) when is_list(V) -> string:join(["keys", V], "=");
 
 query_arg({limit, V}) when is_integer(V) -> string:join(["limit", integer_to_list(V)], "=");
 
@@ -425,5 +408,4 @@ query_arg({startkey, V}) when is_list(V) -> string:join(["startkey", V], "=");
 
 query_arg({startkey_docid, V}) when is_list(V) -> string:join(["startkey_docid", V], "=").
 
-view_error(Error) -> list_to_atom(binary_to_list(Error)).
 
