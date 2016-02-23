@@ -43,13 +43,17 @@ start_link(Args) ->
 %% @end
 %%--------------------------------------------------------------------
 init([{host, Host}, {username, Username}, {password, Password},
-      {bucketname, BucketName}, {transcoder, Transcoder}]) ->
+      {bucketname, BucketName}, {options, Opts}]) ->
     process_flag(trap_exit, true),
+    Transcoder = proplists:get_value(transcoder, Opts, cberl_transcoder),
+    Timeout = proplists:get_value(timeout, Opts, 5000),
+    TimeoutToMcs = Timeout * 1000,
+    CouchbaseOpts = [Host, Username, Password, BucketName, TimeoutToMcs],
     {ok, Handle} = cberl_nif:new(),
     State = #instance{handle = Handle,
                       transcoder = Transcoder,
                       bucketname = canonical_bucket_name(BucketName),
-                      opts = [Host, Username, Password, BucketName],
+                      opts = CouchbaseOpts,
                       connected = false},
     State2 = case connect(State) of
         ok -> State#instance{connected = true};

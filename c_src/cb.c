@@ -26,6 +26,8 @@ void *cb_connect_args(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
     args->bucket = (char *) malloc(arg_length + 1);
     if (!enif_get_string(env, argv[3], args->bucket, arg_length + 1, ERL_NIF_LATIN1)) goto error4;
 
+    if (!enif_get_int(env, argv[4], &args->timeout)) goto error0;
+
     return (void*)args;
 
     error4:
@@ -67,6 +69,7 @@ ERL_NIF_TERM cb_connect(ErlNifEnv* env, handle_t* handle, void* obj)
     create_options.v.v0.user = args->user;
     create_options.v.v0.bucket = args->bucket;
     create_options.v.v0.passwd = args->pass;
+    int timeout = args->timeout;
 
     err = lcb_create(&(handle->instance), &create_options);
 
@@ -99,6 +102,13 @@ ERL_NIF_TERM cb_connect(ErlNifEnv* env, handle_t* handle, void* obj)
     if(err != LCB_SUCCESS) {
         return return_lcb_error(env, err);
     }
+
+    #ifdef LCB_CNTL_OP_TIMEOUT
+    err = lcb_cntl(handle->instance, LCB_CNTL_SET, LCB_CNTL_OP_TIMEOUT, &timeout);
+    if(err != LCB_SUCCESS) {
+        return return_lcb_error(env, err);
+    }
+    #endif
 
     #ifdef LCB_CNTL_DETAILED_ERRCODES
     int val = 1;

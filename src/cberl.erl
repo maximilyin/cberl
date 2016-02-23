@@ -39,15 +39,16 @@ start_link(Host, Username, Password) ->
 %% @end
 %% @equiv start_link(PoolName, NumCon, Host, Username, Password, cberl_transcoder)
 start_link(Host, Username, Password, BucketName) ->
-    start_link(Host, Username, Password, BucketName, cberl_transcoder).
+    Opts = [{transcoder, cberl_transcoder}, {timeout, 5000}],
+    start_link(Host, Username, Password, BucketName, Opts).
 
 -spec start_link(string(), string(), string(), string(), atom()) -> {ok, pid()} | {error, _}.
-start_link(Host, Username, Password, BucketName, Transcoder) ->
+start_link(Host, Username, Password, BucketName, Opts) ->
     WorkerArgs = [{host, Host},
 		{username, Username},
 		{password, Password},
 		{bucketname, BucketName},
-		{transcoder, Transcoder}],
+		{options, Opts}],
     cberl_worker:start_link(WorkerArgs).
 
 stop(PoolName) ->
